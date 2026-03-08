@@ -10,6 +10,11 @@ node_modules/
 framework/dist/
 framework/.observablehq/cache/
 
+# Generated data — do not commit (produced by sidecar ETL at runtime)
+framework/docs/data/**/*.parquet
+framework/docs/data/manifest_raw.json
+framework/docs/.observablehq/
+
 # Logs
 *.log
 npm-debug.log*
