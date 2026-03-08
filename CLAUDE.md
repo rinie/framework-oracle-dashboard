@@ -8,18 +8,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install all dependencies (root workspace)
 npm install
 
-# Development (runs sidecar + framework concurrently)
+# Development (runs dyndataloader + framework concurrently)
 npm run dev
 
 # Build production static site (output: framework/dist/)
 npm run build
 
-# Production preview (sidecar + framework static preview)
+# Production preview (dyndataloader + framework static preview)
 npm run start
 
-# Sidecar only
-npm run dev --workspace=sidecar
-npm run start --workspace=sidecar
+# Dyndataloader only
+npm run dev --workspace=dyndataloader
+npm run start --workspace=dyndataloader
 
 # Framework only
 npm run dev --workspace=framework
@@ -30,10 +30,10 @@ There are no test scripts defined. Linting is also not configured.
 
 ## Environment Setup
 
-Before running the sidecar, copy and populate the env file:
+Before running the dyndataloader, copy and populate the env file:
 
 ```bash
-cp sidecar/.env.example sidecar/.env
+cp dyndataloader/.env.example dyndataloader/.env
 ```
 
 Required env vars: `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`.
@@ -43,32 +43,32 @@ Optional: `PORT` (default 3001), `BEARER_TOKEN`, `POLL_INTERVAL_MS` (default 600
 
 This is an **npm workspaces** monorepo with two packages:
 
-- `sidecar/` — Node.js/Express server that queries Oracle and streams data
+- `dyndataloader/` — Node.js/Express server that queries Oracle and writes Parquet data
 - `framework/` — Observable Framework static site that visualizes the data
 
 ### Data flow
 
 ```
-Oracle DB → duckdb-oracle → sidecar → WebSocket (Arrow IPC) → browser (DuckDB-WASM) → charts
+Oracle DB → node-oracledb → dyndataloader → Hive-partitioned zstd Parquet → framework/docs/data/ → browser (DuckDB-WASM) → charts
 ```
 
-1. **`sidecar/src/db.js`** — Opens a DuckDB `:memory:` instance, loads the `oracle` extension, then ATTACHes Oracle on each query and DETACHes after. Returns Arrow IPC `Uint8Array` via `apache-arrow`'s `tableToIPC`.
+1. **`dyndataloader/src/db.js`** — Oracle connection pool via node-oracledb (thick mode). Returns plain lowercase-keyed rows.
 
-2. **`sidecar/src/datasets.js`** — Single source of truth for all Oracle queries. Each entry has `name`, `sql`, `enabled`. This is the file to edit when adding new data sources.
+2. **`dyndataloader/src/datasets.js`** — Single source of truth for all Oracle queries. Each entry has `name`, `sql`, `sqlIncremental`, `enabled`. This is the file to edit when adding new data sources.
 
-3. **`sidecar/src/broadcaster.js`** — Manages connected WebSocket clients. On new connection, pushes all datasets immediately. Exports `pushAll()` and `pushDataset()`. Wire message format: `[4-byte LE uint32 name length][name bytes][Arrow IPC bytes]`. Errors are sent as JSON strings `{ type, dataset, message, timestamp }`.
+3. **`dyndataloader/src/etl.js`** — Hive-partitioned Parquet writer. Full run clears and rewrites all partitions; incremental run overwrites only the current month. Also writes a static combined `sales_summary.parquet` for direct browser fetch.
 
-4. **`sidecar/src/scheduler.js`** — Calls `pushAll()` on a `setInterval` based on `POLL_INTERVAL_MS`. Also exports `triggerRefresh(datasetName?)` for the HTTP `/refresh` endpoints.
+4. **`dyndataloader/src/manifest.js`** — Writes `manifest_raw.json` after each ETL run (dataset name, updatedAt, row count, mode).
 
-5. **`framework/src/components/oracle-ws.js`** — Browser-side WebSocket client. Decodes the binary envelope, deserializes Arrow IPC with `tableFromIPC`, and dispatches to registered callbacks. Auto-reconnects with exponential backoff (3 s → 30 s). Subscribe to connection status via `subscribe("__status__", cb)` and per-dataset errors via `subscribe("__error__:datasetName", cb)`.
+5. **`dyndataloader/src/scheduler.js`** — Calls ETL on a `setInterval` based on `POLL_INTERVAL_MS`. Also exports `triggerRefresh(datasetName?)` for the HTTP `/refresh` endpoints.
 
-6. **`framework/docs/`** — Observable Framework pages (Markdown + embedded JS). Pages use `Mutable()` for reactive state and call `subscribe("dataset_name", table => ...)`. Charts are built with Observable Plot.
+6. **`framework/docs/`** — Observable Framework pages (Markdown + embedded JS). Pages poll `/_file/data/manifest_raw.json` and fetch `/_file/data/<dataset>.parquet` via DuckDB-WASM.
 
-7. **`framework/observablehq.config.js`** — Framework config. In dev, proxies `ws://localhost:3001/data` so the framework dev server forwards WebSocket connections to the sidecar. In production, a reverse proxy must forward `/data` to the sidecar.
+7. **`framework/observablehq.config.js`** — Framework config with `root: "framework/docs"`. Run with `--root framework` from repo root.
 
 ### Adding a new dataset
 
-1. Add an entry to `sidecar/src/datasets.js` (`name`, `sql`, `enabled: true`).
-2. Create or edit a page in `framework/docs/` — call `subscribe("your_dataset_name", (table) => { ... })`.
+1. Add an entry to `dyndataloader/src/datasets.js` (`name`, `sql`, `sqlIncremental`, `enabled: true`).
+2. Create or edit a page in `framework/docs/` — poll `/_file/data/manifest_raw.json`, fetch `/_file/data/your_dataset.parquet`.
 3. Register the page in `framework/observablehq.config.js` under `pages`.
 4. Use `POST /refresh/your_dataset_name` (with `Authorization: Bearer <token>`) to push immediately without waiting for the scheduler.

@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "sidecar",
+    "dyndataloader",
     "framework"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=sidecar\" \"npm run dev --workspace=framework\"",
+    "dev": "concurrently \"npm run dev --workspace=dyndataloader\" \"npm run dev --workspace=framework\"",
     "build": "npm run build --workspace=framework",
-    "start": "concurrently \"npm run start --workspace=sidecar\" \"npm run preview --workspace=framework\""
+    "start": "concurrently \"npm run start --workspace=dyndataloader\" \"npm run preview --workspace=framework\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

@@ -25,14 +25,14 @@ async function fetchSalesData() {
     manifest = await r.json();
   } catch (e) {
     statusEl.className = "status-bar status-error";
-    statusEl.textContent = "⚠ Cannot reach manifest — is the sidecar running?";
+    statusEl.textContent = "⚠ Cannot reach manifest — is the dyndataloader running?";
     return;
   }
 
   const info = manifest.datasets?.sales_summary;
   if (!info) {
     statusEl.className = "status-bar status-error";
-    statusEl.textContent = "⚠ No data yet — trigger POST /refresh on the sidecar";
+    statusEl.textContent = "⚠ No data yet — trigger POST /refresh on the dyndataloader";
     return;
   }
 
