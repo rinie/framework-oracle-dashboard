@@ -1,0 +1,15 @@
+{
+  "name": "oracle-dashboard-framework",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "observable preview",
+    "build": "observable build",
+    "preview": "observable preview --no-open"
+  },
+  "dependencies": {
+    "@observablehq/framework": "^1.9.0",
+    "apache-arrow": "^14.0.2"
+  }
+}

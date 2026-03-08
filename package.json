@@ -1,0 +1,17 @@
+{
+  "name": "oracle-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "sidecar",
+    "framework"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=sidecar\" \"npm run dev --workspace=framework\"",
+    "build": "npm run build --workspace=framework",
+    "start": "concurrently \"npm run start --workspace=sidecar\" \"npm run preview --workspace=framework\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
