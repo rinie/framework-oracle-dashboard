@@ -1,7 +1,6 @@
 // observablehq.config.js
 export default {
   title: "Oracle Dashboard",
-  root: "docs",
   pages: [
     { name: "Sales Summary", path: "/sales-summary" }
   ],
