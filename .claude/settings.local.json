@@ -3,7 +3,13 @@
     "allow": [
       "Bash(npm run:*)",
       "Bash(cmd:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm list:*)",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(wmic process:*)"
     ]
   }
 }

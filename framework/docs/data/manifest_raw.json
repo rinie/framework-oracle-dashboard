@@ -1,0 +1,9 @@
+{
+  "datasets": {
+    "sales_summary": {
+      "updatedAt": "2026-03-08T12:55:53.758Z",
+      "rows": 6,
+      "mode": "incremental"
+    }
+  }
+}

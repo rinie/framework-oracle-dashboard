@@ -1,11 +1,10 @@
 // index.js — Express sidecar entry point.
-// Exposes: GET /health, POST /refresh, POST /refresh/:dataset, WS /data
+// Exposes: GET /health, POST /refresh[/:dataset][?full=true]
 
 import "dotenv/config";
 import express from "express";
-import { createServer } from "http";
-import { attachWebSocket } from "./broadcaster.js";
-import { startScheduler, triggerRefresh } from "./scheduler.js";
+import { runEtl } from "./etl.js";
+import { startScheduler } from "./scheduler.js";
 
 const app = express();
 app.use(express.json());
@@ -14,7 +13,7 @@ app.use(express.json());
 
 function requireBearer(req, res, next) {
   const token = process.env.BEARER_TOKEN;
-  if (!token) return next(); // no token configured = open (dev only)
+  if (!token) return next();
 
   const auth = req.headers["authorization"] ?? "";
   if (auth !== `Bearer ${token}`) {
@@ -44,30 +43,32 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Refresh all datasets
+// Refresh all datasets  (?full=true forces full history re-pull)
 app.post(
   "/refresh",
   requireBearer,
   conflictGuard("__all__"),
   async (req, res) => {
     try {
-      const triggered = await triggerRefresh();
-      res.json({ triggered, timestamp: new Date().toISOString() });
+      const full = req.query.full === "true";
+      const triggered = await runEtl(null, { full });
+      res.json({ triggered, full, timestamp: new Date().toISOString() });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   }
 );
 
-// Refresh a single dataset
+// Refresh a single dataset  (?full=true forces full history re-pull)
 app.post(
   "/refresh/:dataset",
   requireBearer,
   (req, res, next) => conflictGuard(req.params.dataset)(req, res, next),
   async (req, res) => {
     try {
-      const triggered = await triggerRefresh(req.params.dataset);
-      res.json({ triggered, timestamp: new Date().toISOString() });
+      const full = req.query.full === "true";
+      const triggered = await runEtl(req.params.dataset, { full });
+      res.json({ triggered, full, timestamp: new Date().toISOString() });
     } catch (err) {
       const status = err.message.startsWith("Dataset not found") ? 404 : 500;
       res.status(status).json({ error: err.message });
@@ -78,12 +79,9 @@ app.post(
 // ── Server bootstrap ─────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
-const server = createServer(app);
 
-attachWebSocket(server);
 startScheduler();
 
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`[sidecar] Listening on http://localhost:${PORT}`);
-  console.log(`[sidecar] WebSocket on  ws://localhost:${PORT}/data`);
 });

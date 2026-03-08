@@ -10,6 +10,15 @@ const clients = new Set();
 export function attachWebSocket(server) {
   wss = new WebSocketServer({ server, path: "/data" });
 
+  // Send a heartbeat ping every 20 s so clients can detect dead connections
+  // through the proxy (which may not propagate close events reliably).
+  const PING_MSG = JSON.stringify({ type: "ping" });
+  setInterval(() => {
+    for (const ws of clients) {
+      if (ws.readyState === ws.OPEN) ws.send(PING_MSG);
+    }
+  }, 20_000);
+
   wss.on("connection", (ws, req) => {
     console.log(`[ws] Client connected (${clients.size + 1} total)`);
     clients.add(ws);

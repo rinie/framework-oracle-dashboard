@@ -1,86 +1,61 @@
-// db.js — DuckDB connection with duckdb-oracle extension.
-// Queries Oracle and returns results as Arrow IPC Uint8Array.
+// db.js — Oracle connection pool via node-oracledb.
+// Returns plain row objects (lowercase keys) ready for ETL.
 
-import duckdb from "duckdb";
-import { tableFromArrays, tableToIPC } from "apache-arrow";
+import oracledb from "oracledb";
 
-let db = null;
-let extensionLoaded = false;
+oracledb.initOracleClient({
+  configDir: "C:\\opt\\Oracle\\admin",
+  libDir: "C:\\opt\\oracle\\instantclient_19_26",
+});
 
-async function getDb() {
-  if (db && extensionLoaded) return db;
+let pool = null;
 
-  db = new duckdb.Database(":memory:");
+async function getPool() {
+  if (pool) return pool;
 
-  await new Promise((resolve, reject) => {
-    db.run("LOAD oracle;", (err) => {
-      if (err) return reject(new Error(`Failed to load oracle extension: ${err.message}`));
-      extensionLoaded = true;
-      console.log("[db] duckdb-oracle extension loaded");
-      resolve();
-    });
-  });
-
-  return db;
-}
-
-/**
- * Attach Oracle, run SQL, detach, return Arrow IPC Uint8Array.
- * @param {string} sql
- * @returns {Promise<Uint8Array>}
- */
-export async function queryToArrow(sql) {
   const { ORACLE_DSN, ORACLE_USER, ORACLE_PASSWORD } = process.env;
 
   if (!ORACLE_DSN || !ORACLE_USER || !ORACLE_PASSWORD) {
     throw new Error("Missing ORACLE_DSN / ORACLE_USER / ORACLE_PASSWORD env vars");
   }
 
-  const database = await getDb();
-  const con = database.connect();
-
-  return new Promise((resolve, reject) => {
-    const attachSql = `ATTACH 'oracle://${ORACLE_USER}:${ORACLE_PASSWORD}@${ORACLE_DSN}' AS oracle_db (TYPE oracle);`;
-
-    con.run(attachSql, (err) => {
-      if (err) {
-        con.close();
-        return reject(new Error(`ATTACH failed: ${err.message}`));
-      }
-
-      con.all(sql, (err, rows) => {
-        // Always detach
-        con.run("DETACH oracle_db;", () => {
-          con.close();
-
-          if (err) return reject(new Error(`Query failed: ${err.message}`));
-
-          try {
-            resolve(rowsToArrowIPC(rows ?? []));
-          } catch (e) {
-            reject(e);
-          }
-        });
-      });
-    });
+  pool = await oracledb.createPool({
+    user: ORACLE_USER,
+    password: ORACLE_PASSWORD,
+    connectString: ORACLE_DSN,
+    poolMin: 1,
+    poolMax: 5,
+    poolIncrement: 1,
   });
+
+  console.log("[db] node-oracledb connection pool created");
+  return pool;
 }
 
 /**
- * Convert duckdb row objects to Arrow IPC binary.
- * @param {object[]} rows
- * @returns {Uint8Array}
+ * Run SQL against Oracle and return rows as plain objects with lowercase keys.
+ * DATE columns are converted to ISO strings.
+ * @param {string} sql
+ * @returns {Promise<object[]>}
  */
-function rowsToArrowIPC(rows) {
-  if (rows.length === 0) {
-    return tableToIPC(tableFromArrays({}));
-  }
+export async function queryToRows(sql) {
+  const p = await getPool();
+  const connection = await p.getConnection();
 
-  const keys = Object.keys(rows[0]);
-  const arrays = {};
-  for (const key of keys) {
-    arrays[key] = rows.map((r) => r[key]);
-  }
+  try {
+    const result = await connection.execute(sql, [], {
+      outFormat: oracledb.OUT_FORMAT_OBJECT,
+      fetchArraySize: 1000,
+    });
 
-  return tableToIPC(tableFromArrays(arrays));
+    return (result.rows ?? []).map((row) => {
+      const out = {};
+      for (const [k, v] of Object.entries(row)) {
+        out[k.toLowerCase()] = v instanceof Date ? v.toISOString() : v;
+      }
+      return out;
+    });
+  } finally {
+    await connection.close();
+  }
 }

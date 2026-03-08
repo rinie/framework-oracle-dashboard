@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "observable preview",
-    "build": "observable build",
-    "preview": "observable preview --no-open"
+    "dev": "cd .. && observable preview --root framework",
+    "build": "cd .. && observable build --root framework",
+    "preview": "cd .. && observable preview --no-open --root framework"
   },
   "dependencies": {
     "@observablehq/framework": "^1.9.0",
-    "apache-arrow": "^14.0.2"
+    "apache-arrow": "^14.0.2",
+    "duckdb": "^1.4.4"
   }
 }

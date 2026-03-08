@@ -4,34 +4,72 @@ title: Sales Summary
 
 # Sales Summary
 
-<div id="status-bar" class="status-bar status-connecting">Connecting to Oracle sidecar…</div>
+<div id="status-bar" class="status-bar status-loading">Loading data…</div>
 
 ```js
-import { subscribe } from "./components/oracle-ws.js";
+// ── Manifest polling + Parquet loading ────────────────────────────────────────
+// Polls /data/manifest.json every 30 s (served by the manifest.json.js data loader).
+// When updatedAt changes, fetches /data/sales_summary.parquet (data loader combines
+// all Hive partitions) and loads it into DuckDB-WASM.
 
-// ── Reactive state ────────────────────────────────────────────────────────────
-
-const statusEl = document.getElementById("status-bar");
-
-// Connection status
-subscribe("__status__", ({ status }) => {
-  statusEl.className = `status-bar status-${status}`;
-  statusEl.textContent =
-    status === "connected"
-      ? "● Live — connected to Oracle sidecar"
-      : "○ Disconnected — reconnecting…";
-});
-
-// Sales data — Mutable for reactivity
+const POLL_MS = 30_000;
 const salesData = Mutable([]);
-subscribe("sales_summary", (table) => {
-  salesData.value = table.toArray().map((row) => ({
-    month: new Date(row.month),
-    region: row.region,
-    total_sales: Number(row.total_sales),
-    order_count: Number(row.order_count)
-  }));
-});
+const statusEl = document.getElementById("status-bar");
+let lastUpdatedAt = null;
+
+async function fetchSalesData() {
+  let manifest;
+  try {
+    const r = await fetch(`/_file/data/manifest_raw.json?t=${Date.now()}`);
+    if (!r.ok) throw new Error(`manifest HTTP ${r.status}`);
+    manifest = await r.json();
+  } catch (e) {
+    statusEl.className = "status-bar status-error";
+    statusEl.textContent = "⚠ Cannot reach manifest — is the sidecar running?";
+    return;
+  }
+
+  const info = manifest.datasets?.sales_summary;
+  if (!info) {
+    statusEl.className = "status-bar status-error";
+    statusEl.textContent = "⚠ No data yet — trigger POST /refresh on the sidecar";
+    return;
+  }
+
+  if (info.updatedAt === lastUpdatedAt) return; // no change
+  lastUpdatedAt = info.updatedAt;
+
+  statusEl.className = "status-bar status-loading";
+  statusEl.textContent = "↻ Loading…";
+
+  try {
+    const buf = await fetch(`/_file/data/sales_summary.parquet?t=${Date.now()}`).then((r) => r.arrayBuffer());
+    const db = await DuckDBClient.of({});
+    await db._db.registerFileBuffer("sales_summary.parquet", new Uint8Array(buf));
+    const result = await db.query("SELECT * FROM read_parquet('sales_summary.parquet')");
+
+    salesData.value = result.toArray().map((row) => ({
+      month: new Date(row.month),
+      region: String(row.region),
+      total_sales: Number(row.total_sales),
+      order_count: Number(row.order_count),
+    }));
+
+    const mode = info.mode === "incremental" ? " · incremental" : "";
+    statusEl.className = "status-bar status-ok";
+    statusEl.textContent = `● ${info.rows.toLocaleString()} rows — ${new Date(info.updatedAt).toLocaleString()}${mode}`;
+  } catch (e) {
+    console.error("[poll] Failed to load Parquet:", e);
+    statusEl.className = "status-bar status-error";
+    statusEl.textContent = `⚠ Failed to load data: ${e.message}`;
+  }
+}
+
+await fetchSalesData();
+{
+  const id = setInterval(() => fetchSalesData().catch(console.error), POLL_MS);
+  invalidation.then(() => clearInterval(id));
+}
 ```
 
 ```js
@@ -58,7 +96,7 @@ const regions = [...new Set(salesData.map((d) => d.region))].length;
 </div>
 
 ```js
-// ── Sales over time (line chart) ──────────────────────────────────────────────
+// ── Sales over time ────────────────────────────────────────────────────────────
 
 Plot.plot({
   title: "Monthly Sales by Region",
@@ -81,16 +119,13 @@ Plot.plot({
       fill: "region",
       r: 3
     }),
-    Plot.crosshairX(salesData, {
-      x: "month",
-      y: "total_sales"
-    })
+    Plot.crosshairX(salesData, { x: "month", y: "total_sales" })
   ]
 })
 ```
 
 ```js
-// ── Orders bar chart ──────────────────────────────────────────────────────────
+// ── Order count by month ───────────────────────────────────────────────────────
 
 Plot.plot({
   title: "Order Count by Month",
@@ -100,8 +135,9 @@ Plot.plot({
   y: { label: "Orders", grid: true },
   color: { legend: true },
   marks: [
-    Plot.barY(salesData, {
-      x: "month",
+    Plot.rectY(salesData, {
+      x1: (d) => d.month,
+      x2: (d) => new Date(d.month.getFullYear(), d.month.getMonth() + 1),
       y: "order_count",
       fill: "region",
       tip: true
@@ -111,16 +147,11 @@ Plot.plot({
 ```
 
 ```js
-// ── Data table ────────────────────────────────────────────────────────────────
+// ── Data table ─────────────────────────────────────────────────────────────────
 
 Inputs.table(salesData, {
   columns: ["month", "region", "total_sales", "order_count"],
-  header: {
-    month: "Month",
-    region: "Region",
-    total_sales: "Total Sales",
-    order_count: "Orders"
-  },
+  header: { month: "Month", region: "Region", total_sales: "Total Sales", order_count: "Orders" },
   format: {
     month: (d) => d.toLocaleDateString("en-US", { year: "numeric", month: "short" }),
     total_sales: (d) => d.toLocaleString("en-US", { maximumFractionDigits: 0 })
@@ -138,9 +169,9 @@ Inputs.table(salesData, {
   margin-bottom: 1rem;
   font-weight: 500;
 }
-.status-connecting { background: #fef3c7; color: #92400e; }
-.status-connected  { background: #d1fae5; color: #065f46; }
-.status-disconnected { background: #fee2e2; color: #991b1b; }
+.status-loading { background: #fef3c7; color: #92400e; }
+.status-ok      { background: #d1fae5; color: #065f46; }
+.status-error   { background: #fee2e2; color: #991b1b; }
 
 .kpi-grid {
   display: grid;

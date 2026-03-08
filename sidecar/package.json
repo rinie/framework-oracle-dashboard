@@ -9,10 +9,9 @@
     "start": "node src/index.js"
   },
   "dependencies": {
-    "apache-arrow": "^14.0.2",
     "dotenv": "^16.0.0",
-    "duckdb": "^1.2.0",
+    "duckdb": "^1.4.4",
     "express": "^4.18.2",
-    "ws": "^8.16.0"
+    "oracledb": "^6.0.0"
   }
 }
