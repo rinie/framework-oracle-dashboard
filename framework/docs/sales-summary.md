@@ -7,15 +7,19 @@ title: Sales Summary
 <div id="status-bar" class="status-bar status-loading">Loading data…</div>
 
 ```js
-// ── Manifest polling + Parquet loading ────────────────────────────────────────
-// Polls /data/manifest.json every 30 s (served by the manifest.json.js data loader).
-// When updatedAt changes, fetches /data/sales_summary.parquet (data loader combines
-// all Hive partitions) and loads it into DuckDB-WASM.
+// ── Manifest polling + partition-aware Parquet loading ────────────────────────
+// Polls manifest_raw.json every 30 s. On change, registers each Hive partition
+// file as an HTTP URL in DuckDB-WASM so it fetches via range requests — only
+// the data needed for the query is transferred.
 
 const POLL_MS = 30_000;
+// HTTP protocol constant for DuckDB-WASM registerFileURL
+const DUCKDB_HTTP = 4;
+
 const salesData = Mutable([]);
 const statusEl = document.getElementById("status-bar");
 let lastUpdatedAt = null;
+let db = null;
 
 async function fetchSalesData() {
   let manifest;
@@ -43,10 +47,31 @@ async function fetchSalesData() {
   statusEl.textContent = "↻ Loading…";
 
   try {
-    const buf = await fetch(`/_file/data/sales_summary.parquet?t=${Date.now()}`).then((r) => r.arrayBuffer());
-    const db = await DuckDBClient.of({});
-    await db._db.registerFileBuffer("sales_summary.parquet", new Uint8Array(buf));
-    const result = await db.query("SELECT * FROM read_parquet('sales_summary.parquet')");
+    const partitions = info.partitions ?? [];
+
+    // Create a fresh DuckDB-WASM instance on each reload so stale file
+    // registrations don't linger across manifest updates.
+    db = await DuckDBClient.of({});
+
+    // Register each partition as an HTTP URL. DuckDB-WASM will fetch only
+    // the row groups it needs via HTTP range requests.
+    const fileNames = [];
+    for (const ym of partitions) {
+      const name = `ss_${ym}.parquet`;
+      const url = `/_file/data/sales_summary/ym=${ym}/data.parquet`;
+      await db._db.registerFileURL(name, url, DUCKDB_HTTP, false);
+      fileNames.push(name);
+    }
+
+    if (fileNames.length === 0) {
+      salesData.value = [];
+      statusEl.className = "status-bar status-ok";
+      statusEl.textContent = "● No partitions available";
+      return;
+    }
+
+    const fileList = fileNames.map((f) => `'${f}'`).join(", ");
+    const result = await db.query(`SELECT * FROM read_parquet([${fileList}])`);
 
     salesData.value = result.toArray().map((row) => ({
       month: new Date(row.month),
@@ -57,7 +82,7 @@ async function fetchSalesData() {
 
     const mode = info.mode === "incremental" ? " · incremental" : "";
     statusEl.className = "status-bar status-ok";
-    statusEl.textContent = `● ${info.rows.toLocaleString()} rows — ${new Date(info.updatedAt).toLocaleString()}${mode}`;
+    statusEl.textContent = `● ${info.rows.toLocaleString()} rows · ${partitions.length} partitions — ${new Date(info.updatedAt).toLocaleString()}${mode}`;
   } catch (e) {
     console.error("[poll] Failed to load Parquet:", e);
     statusEl.className = "status-bar status-error";

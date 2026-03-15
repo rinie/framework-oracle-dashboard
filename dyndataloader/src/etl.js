@@ -52,7 +52,6 @@ async function etlDataset(dataset, { full }) {
   if (runFull) {
     // Full: clear stale partitions and rewrite all months
     rmSync(outDir, { recursive: true, force: true });
-    mkdirSync(outDir, { recursive: true });
     await writePartitionedByMonth(rows, outDir);
   } else {
     // Incremental: overwrite only the current month's partition
@@ -62,45 +61,38 @@ async function etlDataset(dataset, { full }) {
     await rowsToParquet(rows, join(partDir, "data.parquet"));
   }
 
-  // Write a static combined Parquet so the browser can fetch it without
-  // going through Observable Framework's data-loader cache (which only
-  // invalidates when the .js loader script itself changes).
-  await writeCombinedParquet(outDir, join(DATA_DIR, `${dataset.name}.parquet`));
-
   updateManifest(dataset.name, {
     updatedAt: new Date().toISOString(),
     rows: rows.length,
     mode: runFull ? "full" : "incremental",
+    partitionsDir: outDir,
   });
 
   console.log(`[etl] ${dataset.name}: done → ${outDir}`);
 }
 
-/** Full run: write one Hive partition per month using DuckDB PARTITION_BY. */
+/** Full run: group rows by month in JS, write one data.parquet per partition. */
 async function writePartitionedByMonth(rows, outputDir) {
-  if (rows.length === 0) return; // nothing to write
+  if (rows.length === 0) return;
 
-  const tempFile = join(tmpdir(), `etl_full_${process.pid}_${Date.now()}.json`);
-  try {
-    // Add 'ym' derived from the ISO month string for use as the Hive partition key.
-    // DuckDB PARTITION_BY extracts it into the directory name and drops it from the file.
-    const data = rows.map((r) => ({ ...r, ym: r.month.slice(0, 7) }));
-    writeFileSync(tempFile, JSON.stringify(data));
+  // Group by ym derived from the ISO month string
+  const byMonth = new Map();
+  for (const row of rows) {
+    const ym = row.month.slice(0, 7); // "2026-03"
+    if (!byMonth.has(ym)) byMonth.set(ym, []);
+    byMonth.get(ym).push(row);
+  }
 
-    const src = toDuckPath(tempFile);
-    const dst = toDuckPath(outputDir);
-    await runDuckSQL(
-      `COPY (SELECT * FROM read_json_auto('${src}')) TO '${dst}' ` +
-      `(FORMAT PARQUET, COMPRESSION zstd, PARTITION_BY (ym))`
-    );
-  } finally {
-    try { unlinkSync(tempFile); } catch { /* ignore */ }
+  for (const [ym, monthRows] of byMonth) {
+    const partDir = join(outputDir, `ym=${ym}`);
+    mkdirSync(partDir, { recursive: true });
+    await rowsToParquet(monthRows, join(partDir, "data.parquet"));
   }
 }
 
-/** Incremental run: write rows directly to a single Parquet file. */
+/** Write rows to a single Parquet file via DuckDB. */
 async function rowsToParquet(rows, outputPath) {
-  const tempFile = join(tmpdir(), `etl_inc_${process.pid}_${Date.now()}.json`);
+  const tempFile = join(tmpdir(), `etl_${process.pid}_${Date.now()}.json`);
   try {
     writeFileSync(tempFile, JSON.stringify(rows.length > 0 ? rows : [{}]));
     const src = toDuckPath(tempFile);
@@ -112,16 +104,6 @@ async function rowsToParquet(rows, outputPath) {
   } finally {
     try { unlinkSync(tempFile); } catch { /* ignore */ }
   }
-}
-
-/** Combine all Hive partition files into a single static Parquet for direct serving. */
-async function writeCombinedParquet(partitionsDir, outputPath) {
-  if (!existsSync(partitionsDir)) return;
-  const src = toDuckPath(partitionsDir) + "/**/*.parquet";
-  const dst = toDuckPath(outputPath);
-  await runDuckSQL(
-    `COPY (SELECT * FROM read_parquet('${src}')) TO '${dst}' (FORMAT PARQUET, COMPRESSION zstd)`
-  );
 }
 
 function runDuckSQL(sql) {
