@@ -1,17 +1,32 @@
 {
-  "name": "oracle-dashboard",
-  "version": "1.0.0",
+  "name": "framework-oracle-dashboard",
+  "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "dyndataloader",
-    "framework"
-  ],
+  "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=dyndataloader\" \"npm run dev --workspace=framework\"",
-    "build": "npm run build --workspace=framework",
-    "start": "concurrently \"npm run start --workspace=dyndataloader\" \"npm run preview --workspace=framework\""
+    "dev": "node scripts/start.js",
+    "build": "observable build",
+    "preview": "observable preview",
+    "duckdb:start": "node scripts/start-duckdb.js",
+    "duckdb:stop": "node scripts/stop-duckdb.js"
+  },
+  "dependencies": {
+    "@observablehq/framework": "^1.9.0",
+    "@duckdb/node-api": "^1.5.0-r.1"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "observablehq": {
+    "root": "src",
+    "output": "dist",
+    "title": "Oracle Dashboard",
+    "pages": [
+      { "name": "Overview", "path": "/" },
+      { "name": "Oracle Tables", "path": "/oracle-tables" }
+    ]
   }
 }

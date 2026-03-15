@@ -1,87 +1,89 @@
-# Oracle Dashboard
+# framework-oracle-dashboard
 
-Observable Framework dashboard with a Node.js/Express dyndataloader that queries Oracle via `node-oracledb` and writes Hive-partitioned zstd Parquet files consumed by the browser via DuckDB-WASM.
+Observable Framework dashboard backed by DuckDB 1.5 + duckdb-oracle extension,
+using the duckdb-ui HTTP server as the query backend.
+
+## Prerequisites
+
+- Node.js 20+
+- DuckDB v1.5 CLI binary
+- Your compiled `duckdb_oracle.duckdb_extension` (built against v1.5 headers)
+- Oracle Instant Client on `LD_LIBRARY_PATH` / `PATH`
+
+## Quick start
+
+### 1. Start DuckDB with the oracle extension and UI server
+
+```bash
+duckdb -init startup.sql my-data.db
+```
+
+Edit `startup.sql` to set the correct:
+- Path to `duckdb_oracle.duckdb_extension`
+- Oracle DSN (`user/pass@//host:port/SID`)
+
+The UI server will listen on `http://localhost:4213`.
+
+### 2. Start Observable Framework dev server
+
+```bash
+npm install
+npm run dev
+```
+
+Framework starts on `http://localhost:3000`.
+Because `startup.sql` sets `ui_remote_url = 'http://localhost:3000'`,
+visiting `http://localhost:4213` will proxy UI assets from Framework.
+
+You can also visit Framework directly at `http://localhost:3000`.
+
+### 3. Open the dashboard
+
+```
+http://localhost:3000
+```
+
+Data loaders hit the duckdb-ui `/query` endpoint at build time to
+produce static JSON snapshots. The browser additionally subscribes
+to `/localEvents` SSE for live schema-change notifications.
 
 ## Architecture
 
 ```
 Oracle DB
-  ↓ node-oracledb (thick mode)
-dyndataloader (Node.js/Express)
-  ├── GET  /health
-  ├── POST /refresh          ← bearer auth, 409 guard, ?full=true for full reload
-  └── POST /refresh/:dataset ← bearer auth, 409 guard
-        ↓
-framework/docs/data/
-  ├── manifest_raw.json          ← updatedAt, row count per dataset
-  ├── <dataset>.parquet          ← combined static Parquet (browser fetches this)
-  └── <dataset>/ym=YYYY-MM/     ← Hive partitions (incremental ETL)
-        ↓
-Observable Framework (static site)
-  └── DuckDB-WASM ← polls manifest, fetches Parquet → reactive charts
+   │  ODPI-C / Instant Client
+   ▼
+DuckDB 1.5 process            Observable Framework
+  ├─ duckdb-oracle extension      ├─ dev server  :3000
+  ├─ duckdb-ui HTTP server :4213  ├─ data loaders (Node.js)
+  │    ├─ POST /query  ◄──────────┤    └─ fetch → /query
+  │    ├─ GET  /localEvents (SSE) │
+  │    └─ proxy → :3000 ◄─────── ┤  (ui_remote_url)
+  └─ DuckDB engine                └─ dashboard pages (.md)
+                                       └─ SSE listener
+                                           /localEvents
 ```
 
-## Setup
+## Configuration
 
-### 1. Prerequisites
+| Env var | Default | Description |
+|---|---|---|
+| `DUCKDB_UI_URL` | `http://localhost:4213` | duckdb-ui server base URL |
+| `ORACLE_SAMPLE_TABLE` | `oracle.EMPLOYEES` | Table used by sample data loader |
 
-- Node.js 18+
-- Oracle Instant Client 19.26 at `C:\opt\oracle\instantclient_19_26`
-- Oracle admin config at `C:\opt\Oracle\admin`
+## Key files
 
-### 2. Install dependencies
+| File | Purpose |
+|---|---|
+| `startup.sql` | DuckDB init — loads oracle ext, starts UI server |
+| `src/components/duckdb-ui.js` | Shared query helper (Node.js + browser) |
+| `src/data/oracle-tables.json.js` | Data loader: Oracle table list snapshot |
+| `src/data/oracle-sample.json.js` | Data loader: sample table rows |
+| `src/index.md` | Home page with live SSE + static snapshot |
+| `src/oracle-tables.md` | Interactive Oracle table explorer |
 
-```bash
-npm install
-```
+## Extension ABI note
 
-### 3. Configure the dyndataloader
-
-```bash
-cp dyndataloader/.env.example dyndataloader/.env
-# Edit dyndataloader/.env with your Oracle credentials and settings
-```
-
-### 4. Add your datasets
-
-Edit `dyndataloader/src/datasets.js` to add Oracle queries.
-
-### 5. Run in development
-
-```bash
-npm run dev
-```
-
-- Dyndataloader: `http://localhost:3001`
-- Framework: `http://localhost:3000`
-
-### 6. Build for production
-
-```bash
-npm run build
-# framework/dist/ contains the static site
-# Run the dyndataloader separately: npm run start --workspace=dyndataloader
-```
-
-## Manual refresh
-
-```bash
-# Refresh all datasets (incremental)
-curl -X POST http://localhost:3001/refresh \
-  -H "Authorization: Bearer your_token"
-
-# Full reload (clears and rewrites all Hive partitions)
-curl -X POST "http://localhost:3001/refresh?full=true" \
-  -H "Authorization: Bearer your_token"
-
-# Refresh one dataset
-curl -X POST http://localhost:3001/refresh/sales_summary \
-  -H "Authorization: Bearer your_token"
-```
-
-## Adding datasets
-
-1. Add an entry to `dyndataloader/src/datasets.js`
-2. Create a Framework page in `framework/docs/` that polls `/_file/data/manifest_raw.json` and fetches `/_file/data/your_dataset.parquet`
-3. Register the page in `framework/observablehq.config.js`
-4. The scheduler will pick it up on the next tick; use `/refresh` to trigger immediately
+The `duckdb_oracle.duckdb_extension` binary **must** be compiled against
+DuckDB v1.5 headers. Extension ABI is version-locked — a v1.4-built
+extension will be refused by a v1.5 DuckDB process.
