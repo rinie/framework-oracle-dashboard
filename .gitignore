@@ -6,14 +6,20 @@ node_modules/
 .env.local
 .env.*.local
 
-# Observable Framework build output
+# Observable Framework build output & cache
+dist/
 framework/dist/
-framework/.observablehq/cache/
+.observablehq/
+framework/.observablehq/
+src/.observablehq/
 
 # Generated data — do not commit (produced by sidecar ETL at runtime)
 framework/docs/data/**/*.parquet
 framework/docs/data/manifest_raw.json
 framework/docs/.observablehq/
+
+# Claude Code internal config
+.claude/
 
 # Logs
 *.log

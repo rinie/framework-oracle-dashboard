@@ -1,20 +1,18 @@
 -- startup.sql
--- Run with: duckdb -init startup.sql [database.db]
+-- Run with: duckdb -unsigned -init startup.sql [database.db]
 --
--- Requires duckdb v1.5+ with allow_unsigned_extensions
--- so the ui_remote_url override works.
-
-SET allow_unsigned_extensions = true;
+-- The -unsigned flag is required to load the oracle extension.
+-- allow_unsigned_extensions cannot be set via SQL in v1.5+; it must be
+-- passed as a CLI flag.
 
 -- Load your locally-built oracle extension (adjust path)
-LOAD '/path/to/duckdb_oracle.duckdb_extension';
+LOAD 'oracle';
 
 -- Attach Oracle — update DSN to your environment
-ATTACH 'user/password@//oracle-host:1521/MYDB' AS oracle (TYPE oracle);
+ATTACH '' AS oracle (TYPE oracle, SECRET my_oracle_secret);
 
--- Point the UI asset proxy at Observable Framework dev server
--- (only active during local dev; comment out for production)
-SET ui_remote_url = 'http://localhost:3000';
+-- ui_remote_url is not available in DuckDB v1.5.0.
+-- Remove this comment block once a version that supports it is released.
 
 -- Start the HTTP server on the default port 4213
 -- The browser will NOT be opened automatically (we control the UI)
