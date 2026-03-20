@@ -28,7 +28,8 @@ const catalogVersion = Generators.observe((notify) => {
 
 ```js
 // Live query — re-runs every time catalogVersion ticks.
-const liveRows = catalogVersion, await fetch(`${DUCKDB_UI}/query`, {
+// Wrap in parens so the comma is the comma-operator (dependency trick), not a const declaration.
+const liveRows = (catalogVersion, await fetch(`${DUCKDB_UI}/query`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -40,7 +41,7 @@ const liveRows = catalogVersion, await fetch(`${DUCKDB_UI}/query`, {
 }).then(r => r.json()).then(({ columns, rows }) => {
   const names = columns.map(c => c.name);
   return rows.map(row => Object.fromEntries(names.map((n, i) => [n, row[i]])));
-});
+}));
 ```
 
 ## Oracle tables (live)

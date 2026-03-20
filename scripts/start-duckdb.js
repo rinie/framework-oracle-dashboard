@@ -50,12 +50,27 @@ function readBody(req) {
 }
 
 function json(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
   res.end(JSON.stringify(data));
+}
+
+function cors(res) {
+  res.writeHead(204, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  });
+  res.end();
 }
 
 const server = createServer(async (req, res) => {
   const { method, url } = req;
+
+  // Preflight
+  if (method === 'OPTIONS') return cors(res);
 
   // Health check
   if (method === 'GET' && url === '/health') {
@@ -89,7 +104,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  res.writeHead(404);
+  res.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
   res.end();
 });
 
