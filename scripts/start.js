@@ -29,14 +29,15 @@ await waitForUrl(`${DUCKDB_UI_URL}/health`, TIMEOUT_MS);
 console.log('[start] DuckDB query server ready.');
 
 // --- Start Observable Framework ---------------------------------------------
-const obsCmd = process.platform === 'win32'
-  ? join(root, 'node_modules', '.bin', 'observable.cmd')
-  : join(root, 'node_modules', '.bin', 'observable');
+// On Windows, .cmd files must be run via cmd.exe — but pass the path as an
+// argument rather than using shell:true to avoid the DEP0190 warning.
+const [obsCmd, obsArgs] = process.platform === 'win32'
+  ? ['cmd.exe', ['/d', '/s', '/c', join(root, 'node_modules', '.bin', 'observable.cmd'), 'preview']]
+  : [join(root, 'node_modules', '.bin', 'observable'), ['preview']];
 
-const observable = spawn(obsCmd, ['preview'], {
+const observable = spawn(obsCmd, obsArgs, {
   stdio: 'inherit',
   cwd: root,
-  shell: process.platform === 'win32', // .cmd files require a shell on Windows
 });
 
 observable.on('exit', (code) => {
