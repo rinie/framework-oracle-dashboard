@@ -26,18 +26,27 @@ const selectedType = view(
 ```
 
 ```js
-const typeFilter =
-  selectedType === "Tables" ? `AND table_type = 'BASE TABLE'` :
-  selectedType === "Views"  ? `AND table_type = 'VIEW'` :
-  "";
+const schemaQuery =
+  selectedType === "Tables"
+    ? `SELECT DISTINCT table_schema
+       FROM information_schema.tables
+       WHERE table_catalog = 'oracle' AND table_type = 'BASE TABLE'
+       ORDER BY table_schema`
+    : selectedType === "Views"
+    ? `SELECT DISTINCT table_schema
+       FROM information_schema.views
+       WHERE table_catalog = 'oracle'
+       ORDER BY table_schema`
+    : `SELECT DISTINCT table_schema
+       FROM information_schema.tables
+       WHERE table_catalog = 'oracle' AND table_type = 'BASE TABLE'
+       UNION
+       SELECT DISTINCT table_schema
+       FROM information_schema.views
+       WHERE table_catalog = 'oracle'
+       ORDER BY table_schema`;
 
-const schemas = await runQuery(`
-  SELECT DISTINCT table_schema
-  FROM information_schema.tables
-  WHERE table_catalog = 'oracle'
-  ${typeFilter}
-  ORDER BY table_schema
-`);
+const schemas = await runQuery(schemaQuery);
 
 const selectedSchema = view(
   Inputs.select(schemas.map((r) => r.table_schema), { label: "Schema" })
@@ -45,14 +54,33 @@ const selectedSchema = view(
 ```
 
 ```js
-const tables = await runQuery(`
-  SELECT table_name, table_type
-  FROM information_schema.tables
-  WHERE table_catalog = 'oracle'
-    AND table_schema = '${selectedSchema}'
-  ${typeFilter}
-  ORDER BY table_name
-`);
+const tablesQuery =
+  selectedType === "Tables"
+    ? `SELECT table_name, table_type
+       FROM information_schema.tables
+       WHERE table_catalog = 'oracle'
+         AND table_schema = '${selectedSchema}'
+         AND table_type = 'BASE TABLE'
+       ORDER BY table_name`
+    : selectedType === "Views"
+    ? `SELECT table_name, 'VIEW' AS table_type
+       FROM information_schema.views
+       WHERE table_catalog = 'oracle'
+         AND table_schema = '${selectedSchema}'
+       ORDER BY table_name`
+    : `SELECT table_name, table_type
+       FROM information_schema.tables
+       WHERE table_catalog = 'oracle'
+         AND table_schema = '${selectedSchema}'
+         AND table_type = 'BASE TABLE'
+       UNION ALL
+       SELECT table_name, 'VIEW' AS table_type
+       FROM information_schema.views
+       WHERE table_catalog = 'oracle'
+         AND table_schema = '${selectedSchema}'
+       ORDER BY table_name`;
+
+const tables = await runQuery(tablesQuery);
 
 const selectedTable = view(Inputs.table(tables, { multiple: false }));
 ```
