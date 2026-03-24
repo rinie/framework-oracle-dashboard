@@ -3,7 +3,7 @@
 
 import { query } from "../components/duckdb-ui.js";
 
-const TABLE = process.env.ORACLE_SAMPLE_TABLE ?? "oracle.EMPLOYEES";
+const TABLE = process.env.ORACLE_SAMPLE_TABLE ?? "oracle.config";
 
 const rows = await query(`
   SELECT *
